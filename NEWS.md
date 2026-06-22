@@ -1,3 +1,25 @@
+# `v2.12.0` (2026-04-29)
+
+* All node.js actions use node 24 now. Relatedly, all example workflows
+  use recent versions of actions that use node 24.
+
+* `[setup-r]` now uses `use-public-rspm: true` by default on Linux and
+  Windows. macOS binaries require further opt-in with
+  `use-public-rspm: always`.
+
+* It is now possible to require actions to be pinned to a full-length
+  commit SHA in repositories using `r-lib/actions` (#1070).
+
+* `[setup-pandoc][setup-r-dependencies]` now default to Pandoc
+  version 3.8.3.
+
+* `[setup-r-dependencies]` now includes the R architecture in the
+  cache key, so caches for `macos-15` (Apple Silicon) and
+  `macos-15-intel` (Rosetta/x86_64) no longer collide (#1035).
+
+* `[setup-r]` run `apt-get update` without `-qq` on Linux, to make
+  debugging update failures easier (#1058).
+
 # `v2.11.4` (2025-10-08)
 
 * `[setup-r]` correctly installs Rtools again on aarch64 Windows,
