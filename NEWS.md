@@ -1,3 +1,34 @@
+# `v2.13.0` (2026-08028)
+
+* `[setup-r]` now retries r-hub.io HTTP failures (#1088, @nbenn).
+
+* `[setup-r]` now sets the correct RTOOLS environment variables on
+  aarch64 Windows (@vjymisal0, #1104).
+
+* `[setup-r]` keep repositories if they are set by the build.
+  E.g. aarch64 Windows builds now set them (@jeroen, #1101).
+
+* `[setup-r]` now retries transient failures when resolving the R
+  version from `api.r-hub.io`, rather than failing the job on the first
+  timeout or server error (@nbenn, #1086).
+
+* `[setup-r-dependencies]` now switches back to classic `sudo`, if
+  available, on Linux. This fixes installing pak on Ubuntu 26.04 runners
+  (@jeroen, #1096).
+
+# `v2.12.1` (2026-06-23)
+
+* `[setup-r]` now avoids a warning about an `url.parse()` deprecation
+  (#1074).
+
+* `[setup-r-dependencies]` now uses `quarto-dev/quarto-actions` `v2.2.0`
+  (@jdblischak, #1076).
+
+* Examples: `test-coverage.yaml` now uses `codecov/codecov-action` `v7`
+  (@shikokuchuo, #1081).
+
+* New example `claude-investigate.yaml` workflow (@DavisVaughan, #1084).
+
 # `v2.12.0` (2026-04-29)
 
 * All node.js actions use node 24 now. Relatedly, all example workflows
