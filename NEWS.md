@@ -1,3 +1,32 @@
+# 'v2.14.0` (2026-09-21)
+
+* `[setup-r]`: `use-public-rspm: true` now sets up P3M (https://p3m.dev)
+  on macOS as well, for all repositories.
+
+* `[setup-r]` now installs flang 23 on R 4.7.0 (current R-devel) and
+  later, as this is what CRAN uses now (#1107, @andrjohns).
+
+* `[check-r-package]` now uses the correct check directory when showing
+  the testthat output (#1109, @NotAFlightRisk).
+
+# `v2.13.0` (2026-08-28)
+
+* `[setup-r]` now retries r-hub.io HTTP failures (#1088, @nbenn).
+
+* `[setup-r]` now sets the correct RTOOLS environment variables on
+  aarch64 Windows (@vjymisal0, #1104).
+
+* `[setup-r]` keep repositories if they are set by the build.
+  E.g. aarch64 Windows builds now set them (@jeroen, #1101).
+
+* `[setup-r]` now retries transient failures when resolving the R
+  version from `api.r-hub.io`, rather than failing the job on the first
+  timeout or server error (@nbenn, #1086).
+
+* `[setup-r-dependencies]` now switches back to classic `sudo`, if
+  available, on Linux. This fixes installing pak on Ubuntu 26.04 runners
+  (@jeroen, #1096).
+
 # `v2.12.1` (2026-06-23)
 
 * `[setup-r]` now avoids a warning about an `url.parse()` deprecation
