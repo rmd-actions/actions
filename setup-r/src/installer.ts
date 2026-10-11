@@ -108,7 +108,7 @@ async function acquireR(version: IRVersion) {
         await acquireRtools(version),
       ]);
     } else if (IS_MAC) {
-      await core.group("Downloading gfortran", async () => {
+      await core.group("Downloading Fortran compiler", async () => {
         await acquireFortranMacOS(version.version);
       });
       await core.group("Downloading macOS utils", async () => {
@@ -148,11 +148,39 @@ async function acquireR(version: IRVersion) {
 }
 
 async function acquireFortranMacOS(version: string): Promise<string> {
-  if (semver.lt(version, "4.3.0")) {
+  if (semver.gte(version, "4.7.0") && ARCH === "arm64") {
+    return acquireFlangMacOS();
+  } else if (semver.lt(version, "4.3.0")) {
     return acquireFortranMacOSOld();
   } else {
     return acquireFortranMacOSNew(version);
   }
+}
+
+async function acquireFlangMacOS(): Promise<string> {
+  const downloadUrl = "https://mac.cran.dev/tools/flang-23.1.0-darwin23.tar.xz";
+  let downloadPath: string;
+  try {
+    downloadPath = await tc.downloadTool(downloadUrl);
+  } catch (error) {
+    core.debug(`${error}`);
+    throw `Failed to download flang: ${error}`;
+  }
+
+  try {
+    await exec.exec("sudo", ["tar", "-xJf", downloadPath, "-C", "/"]);
+    if (!process.env.SDKROOT) {
+      const sdk = await exec.getExecOutput("xcrun", ["--show-sdk-path"]);
+      core.exportVariable("SDKROOT", sdk.stdout.trim());
+    }
+  } catch (error) {
+    core.debug(`${error}`);
+    throw `Failed to install flang: ${error}`;
+  }
+
+  core.addPath("/opt/R/flang-23/bin");
+
+  return "/";
 }
 
 async function acquireFortranMacOSNew(version: string): Promise<string> {
@@ -557,40 +585,51 @@ async function acquireRtools(version: IRVersion) {
   let addpath = core.getInput("windows-path-include-rtools") === "true";
   core.exportVariable("_R_INSTALL_TIME_PATCHES_", "no");
   if (rtools45) {
-    if (addpath) {
-      if (ARCH == "arm64") {
+    if (ARCH == "arm64") {
+      core.exportVariable("RTOOLS45_AARCH64_HOME", "C:\\rtools45-aarch64");
+      if (addpath) {
         core.addPath(`C:\\rtools45-aarch64\\usr\\bin`);
         core.addPath(
           `C:\\rtools45-aarch64\\aarch64-w64-mingw32.static.posix\\bin`,
         );
-      } else {
+      }
+    } else {
+      core.exportVariable("RTOOLS45_HOME", "C:\\rtools45");
+      if (addpath) {
         core.addPath(`C:\\rtools45\\usr\\bin`);
         core.addPath(`C:\\rtools45\\x86_64-w64-mingw32.static.posix\\bin`);
       }
     }
   } else if (rtools44) {
-    if (addpath) {
-      if (ARCH == "arm64") {
+    if (ARCH == "arm64") {
+      core.exportVariable("RTOOLS44_AARCH64_HOME", "C:\\rtools44-aarch64");
+      if (addpath) {
         core.addPath(`C:\\rtools44-aarch64\\usr\\bin`);
         core.addPath(
           `C:\\rtools44-aarch64\\aarch64-w64-mingw32.static.posix\\bin`,
         );
-      } else {
+      }
+    } else {
+      core.exportVariable("RTOOLS44_HOME", "C:\\rtools44");
+      if (addpath) {
         core.addPath(`C:\\rtools44\\usr\\bin`);
         core.addPath(`C:\\rtools44\\x86_64-w64-mingw32.static.posix\\bin`);
       }
     }
   } else if (rtools43) {
+    core.exportVariable("RTOOLS43_HOME", "C:\\rtools43");
     if (addpath) {
       core.addPath(`C:\\rtools43\\usr\\bin`);
       core.addPath(`C:\\rtools43\\x86_64-w64-mingw32.static.posix\\bin`);
     }
   } else if (rtools42) {
+    core.exportVariable("RTOOLS42_HOME", "C:\\rtools42");
     if (addpath) {
       core.addPath(`C:\\rtools42\\usr\\bin`);
       core.addPath(`C:\\rtools42\\x86_64-w64-mingw32.static.posix\\bin`);
     }
   } else if (rtools40) {
+    core.exportVariable("RTOOLS40_HOME", "C:\\rtools40");
     if (addpath) {
       core.addPath(`C:\\rtools40\\usr\\bin`);
       // If we use Rtools40 and R 4.2.0 or later, then we need to add this
@@ -638,9 +677,6 @@ async function acquireGsWindows() {
   });
 }
 
-const RSPM_DOGFOOD_MACOS_ORGS =
-  ['tidyverse', 'r-lib', 'tidymodels', 'rstudio', 'posit-dev', 'jeroen'];
-
 function shouldUsePublicRspm(): boolean {
   const input = core.getInput("use-public-rspm");
   if (input === "always") return true;
@@ -649,11 +685,8 @@ function shouldUsePublicRspm(): boolean {
   if (!IS_WINDOWS && !IS_LINUX && !IS_MAC) return false;
   // non-intel windows -> false
   if (IS_WINDOWS && ARCH !== 'x86_64') return false;
-  // windows and linux -> true
-  if (IS_WINDOWS || IS_LINUX) return true;
-  // macos -> only Posit orgs
-  const owner = (process.env['GITHUB_REPOSITORY_OWNER'] ?? '').toLowerCase();
-  return RSPM_DOGFOOD_MACOS_ORGS.includes(owner);
+  // otherwise windows, linux or macos -> true
+  return true;
 }
 
 async function setupRLibrary(version: IRVersion) {
@@ -797,11 +830,53 @@ function setREnvironmentVariables() {
 }
 
 async function getJSON<T>(url: string): Promise<T | undefined> {
-  const response = await fetch(url, {
-    headers: { "User-Agent": "setup-r" },
-  });
-  if (!response.ok) return undefined;
-  return (await response.json()) as T;
+  const maxAttempts = 4;
+  const requestTimeoutMs = 15000;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let reason: string;
+
+    try {
+      const response = await fetch(url, {
+        headers: { "User-Agent": "setup-r" },
+        signal: AbortSignal.timeout(requestTimeoutMs),
+      });
+
+      if (response.ok) return (await response.json()) as T;
+
+      // A 404 -- like any status that is not a 5xx, 429 or 408 -- is a
+      // stable answer the callers depend on (to fall back, or to report
+      // "Failed to resolve"), so return it without retrying.
+      if (
+        response.status < 500 &&
+        response.status !== 429 &&
+        response.status !== 408
+      ) {
+        core.debug(`Request to ${url} returned HTTP ${response.status}`);
+        return undefined;
+      }
+
+      reason = `server responded with HTTP ${response.status}`;
+    } catch (error) {
+      reason = `${error}`;
+    }
+
+    // Transient failure: record it at debug (as elsewhere in this file)
+    // and retry with exponential backoff. Once attempts are exhausted,
+    // return undefined like the stable non-OK case above and let the
+    // caller decide (determineVersion's macOS fallback / "Failed to
+    // resolve" error, getReleaseVersion's empty-version degradation).
+    core.debug(
+      `Request to ${url} failed (attempt ${attempt}/${maxAttempts}): ${reason}`,
+    );
+
+    if (attempt >= maxAttempts) return undefined;
+
+    const backoffMs = 1000 * 5 ** (attempt - 1);
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+  }
+
+  return undefined;
 }
 
 // Need to keep this for setting the HTTP User-Agent header to
