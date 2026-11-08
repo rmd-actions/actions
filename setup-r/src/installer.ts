@@ -10,6 +10,13 @@ interface IRVersion {
   type: string;
 }
 
+interface IRtoolsVersion {
+  version: string;
+  url: string;
+  first: string;
+  last: string;
+}
+
 interface IRRefURL {
   URL: string;
 }
@@ -108,7 +115,7 @@ async function acquireR(version: IRVersion) {
         await acquireRtools(version),
       ]);
     } else if (IS_MAC) {
-      await core.group("Downloading gfortran", async () => {
+      await core.group("Downloading Fortran compiler", async () => {
         await acquireFortranMacOS(version.version);
       });
       await core.group("Downloading macOS utils", async () => {
@@ -148,11 +155,39 @@ async function acquireR(version: IRVersion) {
 }
 
 async function acquireFortranMacOS(version: string): Promise<string> {
-  if (semver.lt(version, "4.3.0")) {
+  if (semver.gte(version, "4.7.0") && ARCH === "arm64") {
+    return acquireFlangMacOS();
+  } else if (semver.lt(version, "4.3.0")) {
     return acquireFortranMacOSOld();
   } else {
     return acquireFortranMacOSNew(version);
   }
+}
+
+async function acquireFlangMacOS(): Promise<string> {
+  const downloadUrl = "https://mac.cran.dev/tools/flang-23.1.0-darwin23.tar.xz";
+  let downloadPath: string;
+  try {
+    downloadPath = await tc.downloadTool(downloadUrl);
+  } catch (error) {
+    core.debug(`${error}`);
+    throw `Failed to download flang: ${error}`;
+  }
+
+  try {
+    await exec.exec("sudo", ["tar", "-xJf", downloadPath, "-C", "/"]);
+    if (!process.env.SDKROOT) {
+      const sdk = await exec.getExecOutput("xcrun", ["--show-sdk-path"]);
+      core.exportVariable("SDKROOT", sdk.stdout.trim());
+    }
+  } catch (error) {
+    core.debug(`${error}`);
+    throw `Failed to install flang: ${error}`;
+  }
+
+  core.addPath("/opt/R/flang-23/bin");
+
+  return "/";
 }
 
 async function acquireFortranMacOSNew(version: string): Promise<string> {
@@ -307,7 +342,7 @@ async function acquireRUbuntu(version: IRVersion): Promise<string> {
     await io.mv(downloadPath, path.join(tempDirectory, fileName));
   } catch (error) {
     core.debug(`${error}`);
-    throw `Failed to download version ${version}: ${error}`;
+    throw `Failed to download R ${version.version} from ${downloadUrl}: ${error}`;
   }
   core.endGroup();
 
@@ -381,7 +416,7 @@ async function acquireRMacOS(version: IRVersion): Promise<string> {
     await io.mv(downloadPath, path.join(tempDirectory, fileName));
   } catch (error) {
     core.debug(`${error}`);
-    throw `Failed to download version ${version}: ${error}`;
+    throw `Failed to download R ${version.version} from ${downloadUrl}: ${error}`;
   }
 
   //
@@ -446,7 +481,7 @@ async function acquireRWindows(version: IRVersion): Promise<string> {
     await io.mv(downloadPath, path.join(tempDirectory, fileName));
   } catch (error) {
     core.debug(`${error}`);
-    throw `Failed to download version ${version}: ${error}`;
+    throw `Failed to download R ${version.version} from ${version.url}: ${error}`;
   }
 
   //
@@ -473,24 +508,22 @@ async function acquireRWindows(version: IRVersion): Promise<string> {
   return "";
 }
 
-function getRtoolsUrl(version: string): string {
-  if (version == "45" && ARCH == "arm64") {
-    return "https://github.com/r-hub/rtools45/releases/download/latest/rtools45-aarch64.exe";
-  } else if (version == "45") {
-    return "https://github.com/r-hub/rtools45/releases/download/latest/rtools45.exe";
-  } else if (version == "44" && ARCH == "arm64") {
-    return "https://github.com/r-hub/rtools44/releases/download/latest/rtools44-aarch64.exe";
-  } else if (version == "44") {
-    return "https://github.com/r-hub/rtools44/releases/download/latest/rtools44.exe";
-  } else if (version == "43") {
-    return "https://github.com/r-hub/rtools43/releases/download/latest/rtools43.exe";
-  } else if (version == "42") {
-    return "https://github.com/r-hub/rtools42/releases/download/latest/rtools42.exe";
-  } else if (version == "40") {
-    return "https://cran.rstudio.com/bin/windows/Rtools/rtools40-x86_64.exe";
-  } else {
-    return `https://cran.rstudio.com/bin/windows/Rtools/Rtools${version}.exe`;
+async function getRtoolsUrl(version: string): Promise<string> {
+  const arch = ARCH == "arm64" || ARCH == "aarch64" ? "aarch64" : "x86_64";
+  const url = "https://api.r-hub.io/rversions/rtools-versions/" + arch;
+  const versions = await getJSON<IRtoolsVersion[]>(url);
+  if (!versions) {
+    throw new Error(`Failed to query Rtools versions at ${url}.`);
   }
+  const match = versions.find((v) => v.version == version);
+  if (!match) {
+    const available = versions.map((v) => v.version).join(", ");
+    throw new Error(
+      `Unknown Rtools version '${version}' for ${arch}. ` +
+        `Available versions: ${available}.`,
+    );
+  }
+  return match.url;
 }
 
 async function acquireRtools(version: IRVersion) {
@@ -505,7 +538,7 @@ async function acquireRtools(version: IRVersion) {
     downloadUrl = version.rtools_url || "error";
   } else {
     rtoolsVersion = inpver;
-    downloadUrl = getRtoolsUrl(rtoolsVersion);
+    downloadUrl = await getRtoolsUrl(rtoolsVersion);
   }
 
   const versionNumber = parseInt(rtoolsVersion || "error");
@@ -539,7 +572,7 @@ async function acquireRtools(version: IRVersion) {
       await io.mv(downloadPath, path.join(tempDirectory, fileName));
     } catch (error) {
       core.debug(`${error}`);
-      throw `Failed to download version ${version}: ${error}`;
+      throw `Failed to download Rtools from ${downloadUrl}: ${error}`;
     }
 
     try {
@@ -649,9 +682,6 @@ async function acquireGsWindows() {
   });
 }
 
-const RSPM_DOGFOOD_MACOS_ORGS =
-  ['tidyverse', 'r-lib', 'tidymodels', 'rstudio', 'posit-dev', 'jeroen'];
-
 function shouldUsePublicRspm(): boolean {
   const input = core.getInput("use-public-rspm");
   if (input === "always") return true;
@@ -660,11 +690,8 @@ function shouldUsePublicRspm(): boolean {
   if (!IS_WINDOWS && !IS_LINUX && !IS_MAC) return false;
   // non-intel windows -> false
   if (IS_WINDOWS && ARCH !== 'x86_64') return false;
-  // windows and linux -> true
-  if (IS_WINDOWS || IS_LINUX) return true;
-  // macos -> only Posit orgs
-  const owner = (process.env['GITHUB_REPOSITORY_OWNER'] ?? '').toLowerCase();
-  return RSPM_DOGFOOD_MACOS_ORGS.includes(owner);
+  // otherwise windows, linux or macos -> true
+  return true;
 }
 
 async function setupRLibrary(version: IRVersion) {
